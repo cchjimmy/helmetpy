@@ -1,7 +1,18 @@
 import sys
-import helmet
+import gui
+from PySide6 import QtWidgets
+import argparse
 
-if len(sys.argv) < 3:
-    exit(0)
 
-helmet.generateHelm(sys.argv[1], sys.argv[2])
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "-i", "--input",  help="3D model file path, *.stl")
+parser.add_argument(
+    "-o", "--output", help="3D model file path, *.stl")
+
+args = parser.parse_args(sys.argv[1:])
+
+app = QtWidgets.QApplication()
+gui = gui.HelmetGui(args)
+gui.show()
+sys.exit(app.exec())
