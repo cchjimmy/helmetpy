@@ -2,7 +2,6 @@ from PySide6 import QtCore, QtWidgets
 from pyvistaqt import QtInteractor
 import pyvista
 import helmet
-import numpy
 import typing
 import tempfile
 
@@ -20,6 +19,8 @@ class HelmetGui(QtWidgets.QWidget):
 
         self.setLayout(self.layout)
 
+        self.wireframe = False
+
         self.plotter = QtInteractor(parent=self)
         self.plotter.add_axes()
         if (self.input_path):
@@ -34,8 +35,9 @@ class HelmetGui(QtWidgets.QWidget):
         self.add_button("Clean Mesh", self.clean_mesh)
         self.add_button("Align Mesh", self.align_mesh,
                         "Select three points in order: right tragus, nasion, left tragus.")
+        self.add_button("Generate helmet", self.generate_helmet)
+        self.add_button("Wireframe", self.toggle_wireframe)
         self.add_button("Save Mesh", self.save_mesh)
-        self.add_button("Slice Mesh", self.slice_mesh)
 
     def add_button(self, name: str, cb: typing.Callable[..., None], tool_tip: str = ""):
         button = QtWidgets.QPushButton(name)
@@ -49,14 +51,11 @@ class HelmetGui(QtWidgets.QWidget):
         self.mesh = pyvista.read(self.input_path)
         self.show_mesh()
 
-    def show_mesh(self, wireframe=False):
+    def show_mesh(self):
         self.plotter.clear()
         self.plotter.add_light(pyvista.Light(light_type="headlight"))
-        self.mesh.compute_normals(inplace=True)
-        actor = self.plotter.add_mesh(self.mesh, culling="back")
-        if wireframe:
-            prop = actor.GetProperty()
-            prop.SetRepresentationToWireframe()
+        self.plotter.add_mesh(self.mesh, culling="back", name="mesh")
+        self.show_wireframe()
         self.plotter.view_xz()
         self.plotter.reset_camera()
 
@@ -76,8 +75,8 @@ class HelmetGui(QtWidgets.QWidget):
     @QtCore.Slot()
     def align_mesh(self):
         self.landmarks = []
-        self.plotter.enable_point_picking(
-            callback=self.point_pick_cb)
+        self.plotter.enable_surface_point_picking(
+            callback=self.point_pick_cb, show_point=False)
 
     def point_pick_cb(self, picked_point):
         self.landmarks.append(picked_point)
@@ -109,10 +108,27 @@ class HelmetGui(QtWidgets.QWidget):
         self.show_mesh()
 
     @QtCore.Slot()
-    def slice_mesh(self):
+    def generate_helmet(self):
         tmp = tempfile.NamedTemporaryFile(suffix=".stl")
         self.mesh.save(tmp.name)
+        # helmet.apply_thickness(tmp.name, tmp.name, 4)
         helmet.generate_helmet(tmp.name, tmp.name)
         self.mesh = pyvista.read(tmp.name)
         tmp.close()
         self.show_mesh()
+
+    @QtCore.Slot()
+    def toggle_wireframe(self):
+        actor = self.plotter.renderer.actors["mesh"]
+        prop = actor.GetProperty()
+        self.wireframe = not (prop.GetRepresentation(
+        ) == pyvista.plotting.opts.RepresentationType.WIREFRAME)
+        self.show_wireframe()
+
+    def show_wireframe(self):
+        actor = self.plotter.renderer.actors["mesh"]
+        prop = actor.GetProperty()
+        if self.wireframe:
+            prop.SetRepresentationToWireframe()
+        else:
+            prop.SetRepresentationToSurface()

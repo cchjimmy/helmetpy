@@ -149,21 +149,47 @@ def arrange_mesh(input_path: str, output_path: str) -> trimesh.Trimesh:
     helmet.export(output_path)
 
 
-def apply_thickness(input_path: str, output_path: str, thickness: float) -> trimesh.Trimesh:
-    mesh = trimesh.load_mesh(input_path)
-
+def apply_thickness(input_path: str, output_path: str, thickness: float):
     if thickness <= 0:
         raise ValueError("thickness must be > 0.")
+
+    mesh = trimesh.load_mesh(input_path)
+
     inner = mesh.copy()
     inner.invert()
     outer = mesh.copy()
+
     outer.vertices += outer.vertex_normals * thickness
-    combined = trimesh.util.concatenate(inner, outer)
-    boundary_edges = combined.edges[trimesh.grouping.group_rows(
-        combined.edges_sorted, require_count=1)]
-    # print(boundary_edges)
-    boundary_indices = np.unique(boundary_edges.flat)
-    boundary_verts: np.ndarray = combined.vertices[boundary_indices]
+
+    vertices = np.concatenate((inner.vertices, outer.vertices))
+    faces = []
+
+    inner_boundaries = identify_boundaries(inner)
+    offset = len(inner.vertices)
+    for i in range(len(inner_boundaries.entities)):
+        inner_points = inner_boundaries.entities[i].points
+        points_len = len(inner_points)
+        for j in range(points_len):
+            quad = make_quad(
+                inner_points[j] + offset,
+                inner_points[j],
+                inner_points[(j+1) % points_len]+offset,
+                inner_points[(j+1) % points_len])
+            faces.append(quad[0])
+            faces.append(quad[1])
+
+    faces = np.concatenate((inner.faces, outer.faces + offset, faces))
+
+    trimesh.Trimesh(vertices=vertices, faces=faces).export(output_path)
+
+
+def make_quad(tl, tr, bl, br) -> np.ndarray:
+    return np.array([[tl, tr, bl], [bl, tr, br]])
+
+
+def identify_boundaries(mesh: trimesh.Trimesh) -> trimesh.path.Path3D:
+    path3d_param = trimesh.path.exchange.misc.faces_to_path(mesh)
+    return trimesh.path.Path3D(**path3d_param)
 
 
 def show_vert_norms(input_path: str, scale: float = 1):
@@ -176,7 +202,6 @@ def show_vert_norms(input_path: str, scale: float = 1):
 def align_mesh(input_path: str, output_path: str, landmarks: typing.List[float]):
     landmarks = np.array(landmarks)
 
-    # landmarks mark nasion, left and right tragi
     if (landmarks.shape != (3, 3)):
         raise ValueError("Landmarks must have exactly three 3D points.")
 
@@ -220,31 +245,25 @@ def create_slices(
 
     mesh = trimesh.load_mesh(input_path)
 
-    locations, _, _ = mesh.ray.intersects_location(
-        ray_origins=[plane_origin], ray_directions=[plane_normal])
+    max_point = None
+    max_num = -math.inf
 
-    # ray missed the mesh
-    if len(locations) == 0:
-        return []
+    for vertex in mesh.vertices:
+        dot = np.dot(plane_normal, vertex)
+        if dot < max_num:
+            continue
+        max_num = dot
+        max_point = vertex
 
-    # if plane origin is outside of the mesh use the last point
-    plane_origin = locations[-1] if len(locations) > 1 else plane_origin
-
-    distance = np.linalg.norm(locations[0]-plane_origin)
+    distance = np.linalg.norm(max_point-plane_origin)
     unit_distance = distance/slice_count
-
-    # sections = [
-    #     mesh.section(
-    #         plane_normal=plane_normal,
-    #         plane_origin=plane_origin+unit_distance*i*plane_normal
-    #     )
-    #     for i in range(slice_count)
-    # ]
 
     sections = mesh.section_multiplane(
         plane_normal=plane_normal, plane_origin=plane_origin, heights=np.arange(stop=distance, step=unit_distance))
 
     for i in range(len(sections)):
+        if sections[i] is None:
+            continue
         sections[i] = sections[i].to_3D()
 
     return sections
@@ -253,7 +272,7 @@ def create_slices(
 def sample_path_3d(
     path: trimesh.path.Path3D,
     samples: int = 100
-) -> typing.List[np.ndarray]:
+) -> typing.List[np.array]:
     vertex_sequence = path.discrete[0]
 
     path_len = 0
@@ -278,13 +297,25 @@ def sample_path_3d(
         percent = diff/elm_len
         verts.append(p0+(p1-p0)/elm_len*(1-percent))
 
-    # print(sum_len == path_len, len(verts))
-
     return verts
 
 
 def centroid(input_path: str) -> np.ndarray:
     return trimesh.load_mesh(input_path).centroid
+
+
+def to_circular_path_3D(verts: typing.List[np.array]) -> trimesh.path.Path3D:
+    path_3d = trimesh.path.Path3D()
+    path_3d.vertices = verts
+    path_3d.entities = [trimesh.path.entities.Line(
+        points=list(range(len(verts)))+[0])]
+    return path_3d
+
+
+def find_cephalic_index(path: trimesh.path.Path3D) -> float:
+    planar, to_3D = path.to_2D()
+    size = planar.bounds[1]-planar.bounds[0]
+    return size[0]*100/size[1]
 
 
 def generate_helmet(input_path: str, output_path: str):
@@ -294,12 +325,12 @@ def generate_helmet(input_path: str, output_path: str):
     sampled = [sample_path_3d(slices[i], samples=10)
                for i in range(len(slices))]
 
-    mesh = trimesh.PointCloud(vertices=np.vstack(tuple(sampled))
-                              )
-    # mesh = trimesh.PointCloud(vertices=np.vstack(tuple(sampled))
-    #                           ).convex_hull
+    print(find_cephalic_index(to_circular_path_3D(sampled[0])))
+    print(find_cephalic_index(slices[0]))
 
-    mesh.show(flags={"wireframe": True})
+    mesh = trimesh.PointCloud(vertices=np.vstack(tuple(sampled)))
+
+    mesh = mesh.convex_hull
 
     mesh.update_faces([np.linalg.norm(
         np.dot(mesh.face_normals[i], [0, 0, 1])
@@ -308,3 +339,5 @@ def generate_helmet(input_path: str, output_path: str):
     ])
 
     mesh.export(output_path)
+
+    apply_thickness(output_path, output_path, thickness=4)
