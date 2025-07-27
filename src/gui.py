@@ -19,7 +19,7 @@ class HelmetGui(QtWidgets.QWidget):
 
         self.setLayout(self.layout)
 
-        self.wireframe = False
+        self.representation = pyvista.plotting.opts.RepresentationType.SURFACE
 
         self.plotter = QtInteractor(parent=self)
         self.plotter.add_axes()
@@ -32,12 +32,13 @@ class HelmetGui(QtWidgets.QWidget):
         self.layout.addLayout(self.buttons)
 
         self.add_button("Import Mesh", self.import_mesh)
-        self.add_button("Clean Mesh", self.clean_mesh)
+        self.add_button("Save Mesh", self.save_mesh)
+        # self.add_button("Clean Mesh", self.clean_mesh)
         self.add_button("Align Mesh", self.align_mesh,
                         "Select three points in order: right tragus, nasion, left tragus.")
-        self.add_button("Generate helmet", self.generate_helmet)
-        self.add_button("Wireframe", self.toggle_wireframe)
-        self.add_button("Save Mesh", self.save_mesh)
+        self.add_button("Generate Helmet", self.generate_helmet)
+        self.add_button("Cycle Views", self.cycle_representations)
+        self.add_button("Revert", self.revert)
 
     def add_button(self, name: str, cb: typing.Callable[..., None], tool_tip: str = ""):
         button = QtWidgets.QPushButton(name)
@@ -52,10 +53,11 @@ class HelmetGui(QtWidgets.QWidget):
         self.show_mesh()
 
     def show_mesh(self):
+        if self.mesh is None:
+            return
         self.plotter.clear()
         self.plotter.add_light(pyvista.Light(light_type="headlight"))
         self.plotter.add_mesh(self.mesh, culling="back", name="mesh")
-        self.show_wireframe()
         self.plotter.view_xz()
         self.plotter.reset_camera()
 
@@ -118,17 +120,20 @@ class HelmetGui(QtWidgets.QWidget):
         self.show_mesh()
 
     @QtCore.Slot()
-    def toggle_wireframe(self):
+    def cycle_representations(self):
         actor = self.plotter.renderer.actors["mesh"]
         prop = actor.GetProperty()
-        self.wireframe = not (prop.GetRepresentation(
-        ) == pyvista.plotting.opts.RepresentationType.WIREFRAME)
-        self.show_wireframe()
+        self.representation = (prop.GetRepresentation()+1) % 3
+        rep_type = pyvista.plotting.opts.RepresentationType
+        match self.representation:
+            case rep_type.POINTS:
+                prop.SetRepresentationToPoints()
+            case rep_type.WIREFRAME:
+                prop.SetRepresentationToWireframe()
+            case _:
+                prop.SetRepresentationToSurface()
 
-    def show_wireframe(self):
-        actor = self.plotter.renderer.actors["mesh"]
-        prop = actor.GetProperty()
-        if self.wireframe:
-            prop.SetRepresentationToWireframe()
-        else:
-            prop.SetRepresentationToSurface()
+    @QtCore.Slot()
+    def revert(self):
+        self.mesh = pyvista.read(self.input_path)
+        self.show_mesh()
