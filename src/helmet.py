@@ -2,151 +2,14 @@ import trimesh
 import numpy as np
 import math
 import typing
-# import scipy
 import pymeshfix
 
 
 def clean_mesh(input_path: str, output_path: str):
     pymeshfix.clean_from_file(input_path, output_path)
-
     mesh = trimesh.load_mesh(output_path)
-    # mesh.remove_degenerate_faces()
-    # mesh.remove_infinite_values()
-    # mesh.remove_unreferenced_vertices()
-
-    # mesh = trimesh.smoothing.filter_humphrey(mesh)
     mesh = trimesh.smoothing.filter_laplacian(mesh)
-    # mesh = trimesh.smoothing.filter_mut_dif_laplacian(mesh)
-    # mesh = trimesh.smoothing.filter_taubin(mesh)
-
-    # mesh.update_faces(np.sum((mesh.triangles_center-mesh.centroid) *
-    #                   mesh.face_normals, axis=1) > 0.95)
-    # mesh = mesh.convex_hull
     mesh.export(output_path)
-
-
-def plot_vertex_colors(input_path: str, colors: np.ndarray):
-    mesh = trimesh.load_mesh(input_path)
-    mesh.visual.vertex_colors = colors
-    mesh.show()
-
-
-def plot_mesh_vertex_defects(input_path: str):
-    mesh = trimesh.load_mesh(input_path)
-    defects = trimesh.curvature.vertex_defects(mesh)
-    colors = []
-    for defect in defects:
-        colors.append([defect]*3)
-    plot_vertex_colors(input_path, colors)
-
-
-def plot_mesh_vertex_grads(input_path: str):
-    mesh = trimesh.load_mesh(input_path)
-    plot_vertex_colors(input_path, mesh.vertex_normals.copy())
-
-
-def crop_mesh(
-    input_path: str,
-    output_path: str,
-    # relative to head scan height (z axis, + -> -)
-    helmet_height: float = 0.7,
-    ear_left: float = 0.5,  # relative to head scan depth (y axis, + -> -)
-    ear_radius: float = 0.1,  # relative to head scan depth (y axis, + -> -)
-    ear_height: float = 0.3,  # relative to helmet height (y axis, - -> +)
-    # relative to head scan depth (y axis, + -> -)
-    sideburn_width: float = 0.1,
-):
-    mesh = trimesh.load_mesh(input_path)
-    bb = mesh.bounding_box
-    bb_size = bb.bounds[1]-bb.bounds[0]
-    origin = bb.centroid
-    box = trimesh.primitives.Box(extents=bb_size)
-    box_pos = np.array([0, 0, -helmet_height*(1-ear_height)])
-    box.apply_translation(origin+bb_size*box_pos)
-
-    radius = bb_size[1]*ear_radius
-    ear_hole = trimesh.primitives.Cylinder(radius, bb_size[0]*1.1)
-    ear_hole.apply_transform(
-        trimesh.transformations.rotation_matrix(0.5*math.pi, [0, 1, 0]))
-    ear_hole_pos = np.array([0, -ear_left, 0])
-    ear_hole.apply_translation(
-        origin+bb_size*(0.5*np.array([0, 1, 1])+ear_hole_pos+box_pos))
-    mesh = mesh.difference(ear_hole)
-
-    sideburn = trimesh.primitives.Box(
-        extents=bb_size*[1.1, sideburn_width, helmet_height*ear_height*2])
-    sideburn_pos = np.array([0, -(ear_radius+sideburn_width*0.5), 0])
-    sideburn.apply_translation(
-        origin + bb_size*(0.5*np.array([0, 1, 1])+sideburn_pos+box_pos+ear_hole_pos))
-    box = box.difference(sideburn)
-
-    back = trimesh.primitives.Box(
-        extents=bb_size*[1.1, (ear_left-ear_radius)*1.1, helmet_height*ear_height*2])
-    back_pos = np.array([0, (ear_left-ear_radius)*1.1*0.5+ear_radius, 0])
-    back.apply_translation(
-        origin+bb_size*(0.5*np.array([0, 1, 1])+back_pos+box_pos+ear_hole_pos))
-    box = box.difference(back)
-
-    mesh = mesh.difference(box)
-
-    mesh = trimesh.util.concatenate(mesh, [ear_hole, back, sideburn, box, bb])
-
-    mesh.export(output_path)
-
-
-def arrange_mesh(input_path: str, output_path: str) -> trimesh.Trimesh:
-    mesh = trimesh.load_mesh(input_path)
-
-    origin = mesh.bounding_box.centroid
-
-    # cut into 4 parts
-    left = mesh.copy().slice_plane(
-        plane_normal=[1, 0, 0], plane_origin=origin)
-
-    right = mesh.copy().slice_plane(
-        plane_normal=[-1, 0, 0], plane_origin=origin)
-
-    bl = left.copy().slice_plane(
-        plane_normal=[0, 1, 0], plane_origin=origin)
-    ul = left.copy().slice_plane(
-        plane_normal=[0, -1, 0], plane_origin=origin)
-    br = right.copy().slice_plane(
-        plane_normal=[0, 1, 0], plane_origin=origin)
-    ur = right.copy().slice_plane(
-        plane_normal=[0, -1, 0], plane_origin=origin)
-
-    mirror = np.eye(4)
-    mirror[0, 0] = -1
-
-    parts: trimesh.Trimesh[4] = []
-
-    bottom = bl if bl.area > br.area else br
-    parts.append(bottom)
-    parts.append(bottom.copy().apply_transform(mirror))
-
-    distance = abs(parts[0].bounding_box.centroid -
-                   parts[1].bounding_box.centroid)
-
-    diff = ((parts[0].bounds[1]-parts[0].bounds[0]) -
-            distance)*distance/np.linalg.norm(distance)*0.5
-
-    parts[0].apply_translation(diff)
-    parts[1].apply_translation(-diff)
-
-    up = ul if ul.area > ur.area else ur
-    parts.append(up)
-    parts.append(up.copy().apply_transform(mirror))
-
-    parts[2].apply_translation(diff)
-    parts[3].apply_translation(-diff)
-
-    helmet = trimesh.util.concatenate(parts)
-    print("before merge:", len(helmet.vertices))
-    helmet.merge_vertices()
-    print("after merge:", len(helmet.vertices))
-    helmet.fix_normals()
-
-    helmet.export(output_path)
 
 
 def thicken(input_path: str, output_path: str, thickness: float):
@@ -202,13 +65,6 @@ def identify_boundaries(mesh: trimesh.Trimesh) -> trimesh.path.Path3D:
     return trimesh.path.Path3D(**path3d_param)
 
 
-def show_vert_norms(input_path: str, scale: float = 1):
-    mesh = trimesh.load_mesh(input_path)
-    lines = [[mesh.vertices[i], mesh.vertices[i]+mesh.vertex_normals[i]*scale]
-             for i in range(len(mesh.vertices))]
-    trimesh.load_path(lines).show()
-
-
 def align_mesh(input_path: str, output_path: str, landmarks: typing.List[float]):
     landmarks = np.array(landmarks)
 
@@ -232,18 +88,16 @@ def align_mesh(input_path: str, output_path: str, landmarks: typing.List[float])
 
     r1 = trimesh.transformations.rotation_matrix(
         math.acos(np.dot(normal, target_normal)), np.cross(normal, target_normal))
+
+    normal = (r1@np.append(normal, [1]))[:3]
+    forward = (r1@np.append(forward, [1]))[:3]
+
     r2 = trimesh.transformations.rotation_matrix(
         math.acos(np.dot(forward, target_forward)), np.cross(forward, target_forward))
 
     mesh = trimesh.load_mesh(input_path)
 
-    t1 = trimesh.transformations.translation_matrix(centroid - mesh.centroid)
-
-    mesh.apply_transform(t1)
-    mesh.apply_transform(r1@r2)
-    t1[:3, 3] *= -1
-    mesh.apply_transform(t1)
-    mesh.export(output_path)
+    mesh.apply_transform(r2@r1).export(output_path)
 
 
 def create_slices(
@@ -276,37 +130,6 @@ def create_slices(
     return sections
 
 
-def sample_path_3d(
-    path: trimesh.path.Path3D,
-    samples: int = 100
-) -> typing.List[np.array]:
-    vertex_sequence = path.discrete[0]
-    path_len = 0
-
-    for i in range(len(vertex_sequence)-1):
-        path_len += np.linalg.norm(
-            vertex_sequence[i+1] -
-            vertex_sequence[i])
-
-    interval = path_len / samples
-    sum_len = 0
-    verts = []
-
-    for i in range(len(vertex_sequence)-1):
-        p0 = vertex_sequence[i]
-        p1 = vertex_sequence[i+1]
-        elm_len = np.linalg.norm(p1-p0)
-        sum_len += elm_len
-        target_len = (len(verts)+1)*interval
-        if sum_len < target_len:
-            continue
-        diff = sum_len - target_len
-        percent = diff/elm_len
-        verts.append(p0+(p1-p0)/elm_len*(1-percent))
-
-    return verts
-
-
 def sample_circular_path_3D(
         path: trimesh.path.Path3D,
         origin: np.ndarray,
@@ -316,10 +139,12 @@ def sample_circular_path_3D(
     planar, to_3D = path.to_2D()
     vertex_sequence = planar.discrete[0]
 
+    # trimesh.Scene(geometry=[path, trimesh.PointCloud(vertices=[origin,origin+begin_dir])]).show()
+
     # project origin to path plane
     plane_origin, plane_normal = trimesh.points.plane_fit(path.vertices)
     to_plane = trimesh.points.project_to_plane(
-        [origin, begin_dir - origin], plane_origin=plane_origin, plane_normal=plane_normal, return_planar=True)
+        [origin, origin+begin_dir], plane_origin=plane_origin, plane_normal=plane_normal, return_planar=True)
     origin = to_plane[0]
     d = to_plane[1] - origin
     begin_dir = d/np.linalg.norm(d)
@@ -342,8 +167,6 @@ def sample_circular_path_3D(
         verts.append(intersection[:3])
         break
 
-    return verts
-
     unit_radian = 2*math.pi/samples
     target_radian = unit_radian
     s = math.sin(target_radian)
@@ -363,12 +186,10 @@ def sample_circular_path_3D(
         s = math.sin(target_radian)
         c = math.cos(target_radian)
         rot = np.array([[c, -s], [s, c]])
+        if len(verts) == samples:
+            break
 
     return verts
-
-
-def vec_angles(v1, v2) -> float:
-    return math.acos(np.dot(v1, v2)/(np.linalg.norm(v1)*np.linalg.norm(v2)))
 
 
 def intersect_rays_2D(r1_origin, r1_dir, r2_origin, r2_dir) -> (bool, np.ndarray):
@@ -386,20 +207,8 @@ def intersect_rays_2D(r1_origin, r1_dir, r2_origin, r2_dir) -> (bool, np.ndarray
     return u > 0 and v > 0, r1_origin+r1_dir*u
 
 
-def morpth_path_to_head_shape(path: trimesh.path.Path3D):
-    raise NotImplementedError
-
-
 def centroid(input_path: str) -> np.ndarray:
     return trimesh.load_mesh(input_path).centroid
-
-
-def to_circular_path_3D(verts: typing.List[np.array]) -> trimesh.path.Path3D:
-    path_3d = trimesh.path.Path3D()
-    path_3d.vertices = verts
-    path_3d.entities = [trimesh.path.entities.Line(
-        points=list(range(len(verts)))+[0])]
-    return path_3d
 
 
 def find_cephalic_index(path: trimesh.path.Path3D) -> float:
@@ -408,22 +217,36 @@ def find_cephalic_index(path: trimesh.path.Path3D) -> float:
     return size[0]*100/size[1]
 
 
-def slice_mesh(mesh: trimesh.Trimesh, plane_normal, plane_origin):
-    # credit: https://github.com/mikedh/trimesh/issues/235
-    # need engine argument, can use "triangle"
-    raise NotImplemented
-    dots = np.dot(plane_normal, (mesh.vertices-plane_origin).T)[mesh.faces]
-    positive = trimesh.intersections.slice_mesh_plane(
-        mesh=mesh,
-        plane_normal=plane_normal,
-        plane_origin=plane_origin,
-        cap=True, cache_dots=dots)
-    negative = trimesh.intersections.slice_mesh_plane(
-        mesh=mesh,
-        plane_normal=plane_normal,
-        plane_origin=plane_origin,
-        cap=True, cache_dots=dots*-1)
-    return positive, negative
+def gaussian(x: float = 0, a: float = 1, b: float = 0, c: float = 1) -> float:
+    '''
+    credit: https://en.wikipedia.org/wiki/Gaussian_function
+    x - function input
+    a - height
+    b - x translation
+    c - width, bump dies off at around b+-c/0.3
+    '''
+    return a*math.exp(-(x-b)**2/(2*c**2))
+
+
+def inflate(vertices: np.ndarray, origin: np.ndarray, direction: np.ndarray, height: float = 1, radius: float = 1) -> np.ndarray:
+    vertices = vertices.copy()
+    d = np.linalg.norm(x=vertices-origin, axis=1)
+    cond = d < radius
+    candidates = vertices[cond]
+    for i in range(len(candidates)):
+        candidates[i] += direction * \
+            gaussian(d[cond][i], height, 0, radius*0.3)
+    vertices[cond] = candidates
+    return vertices
+
+
+def show_norms(mesh: trimesh.Trimesh, scale: float = 1):
+    lines = []
+    for i in range(len(mesh.vertices)):
+        lines.append([mesh.vertices[i], mesh.vertices[i] +
+                     mesh.vertex_normals[i]*scale])
+    trimesh.Scene(geometry=[trimesh.load_path(lines), mesh]).show(
+        flags={"wireframe": True})
 
 
 def generate_helmet(input_path: str, output_path: str):
@@ -431,25 +254,12 @@ def generate_helmet(input_path: str, output_path: str):
     mesh = trimesh.load_mesh(output_path)
     c_p = mesh.centroid
     x = np.array([1, 0, 0])
-    y = np.array([0, 1, 0])
     z = np.array([0, 0, 1])
     mesh = mesh.slice_plane(plane_origin=c_p-z*1e-4, plane_normal=z)
-    bounds = mesh.bounds
-    size = bounds[1]-bounds[0]
-    mesh.export(output_path)
     slice_count = 10
     samples = 25
     z_slices = create_slices(output_path, plane_normal=z,
                              plane_origin=c_p, slice_count=slice_count)
-    # y_slices = create_slices(output_path, plane_normal=y,
-    #                          plane_origin=c_p-size*0.5*y, slice_count=slice_count)
-    # x_slices = create_slices(output_path, plane_normal=x,
-    #                          plane_origin=c_p-size*0.5*x, slice_count=slice_count)
-
-    # trimesh.Scene(geometry=[z_slices, x_slices, y_slices]).show()
-
-    # sampled = [sample_path_3d(z_slices[i], samples=100)
-    #            for i in range(len(z_slices))]
 
     sampled = [
         sample_circular_path_3D(
@@ -460,13 +270,8 @@ def generate_helmet(input_path: str, output_path: str):
         for i in range(len(z_slices))
     ]
 
-    trimesh.Scene(geometry=[
-        trimesh.PointCloud(vertices=np.vstack(tuple(sampled))),
-        *z_slices
-    ]).show()
-
     indices = np.arange(samples)
-    indices = np.append(indices, [0])
+    # indices = np.append(indices, [0])
     faces = [
         mesh_strip(indices+samples*i, indices+samples*(i+1))
         for i in range(len(sampled)-1)
@@ -475,12 +280,8 @@ def generate_helmet(input_path: str, output_path: str):
     mesh = trimesh.Trimesh(vertices=np.vstack(
         tuple(sampled)), faces=np.vstack(tuple(faces)))
 
-    # trimesh.Scene(geometry=[mesh, trimesh.load_mesh(input_path)]).show()
-
-    # positive, negative = slice_mesh(mesh, plane_normal=y, plane_origin=c_p)
-
-    # (positive+negative).export(output_path)
-
     mesh.export(output_path)
 
     thicken(output_path, output_path, thickness=4)
+
+    # show_norms(trimesh.load_mesh(output_path), 5)

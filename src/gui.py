@@ -4,25 +4,29 @@ import pyvista
 import helmet
 import typing
 import tempfile
+import tomllib
+import io
 
 
 class HelmetGui(QtWidgets.QWidget):
     def __init__(self, args):
         super().__init__()
 
+        with io.open(file="./config.toml", mode="rb") as config:
+            self.config = tomllib.load(config)
+
         self.setWindowTitle("Helmet GUI")
 
         self.input_path = args.input
         self.output_path = args.output
+        self.representation = pyvista.plotting.opts.RepresentationType.SURFACE
+
+        self.init_plotter()
 
         self.layout = QtWidgets.QHBoxLayout()
 
         self.setLayout(self.layout)
 
-        self.representation = pyvista.plotting.opts.RepresentationType.SURFACE
-
-        self.plotter = QtInteractor(parent=self)
-        self.plotter.add_axes()
         if (self.input_path):
             self.mesh = pyvista.read(self.input_path)
             self.show_mesh()
@@ -39,12 +43,18 @@ class HelmetGui(QtWidgets.QWidget):
         self.add_button("Generate Helmet", self.generate_helmet)
         self.add_button("Cycle Views", self.cycle_representations)
         self.add_button("Revert", self.revert)
+        self.add_button("Inflate", self.inflate)
 
     def add_button(self, name: str, cb: typing.Callable[..., None], tool_tip: str = ""):
         button = QtWidgets.QPushButton(name)
         button.clicked.connect(cb)
         button.setToolTip(tool_tip)
         self.buttons.addWidget(button)
+
+    def init_plotter(self):
+        self.plotter = QtInteractor(parent=self)
+        self.plotter.add_axes()
+        self.plotter.view_xz()
 
     @QtCore.Slot()
     def import_mesh(self):
@@ -53,13 +63,22 @@ class HelmetGui(QtWidgets.QWidget):
         self.show_mesh()
 
     def show_mesh(self):
-        if self.mesh is None:
-            return
-        self.plotter.clear()
-        self.plotter.add_light(pyvista.Light(light_type="headlight"))
-        self.plotter.add_mesh(self.mesh, culling="back", name="mesh")
-        self.plotter.view_xz()
+        self.plotter.remove_actor("mesh")
+        actor = self.plotter.add_mesh(
+            mesh=self.mesh, culling="back", name="mesh")
         self.plotter.reset_camera()
+        self.apply_representation(actor)
+
+    def apply_representation(self, actor):
+        prop = actor.GetProperty()
+        rep_type = pyvista.plotting.opts.RepresentationType
+        match self.representation:
+            case rep_type.POINTS:
+                prop.SetRepresentationToPoints()
+            case rep_type.WIREFRAME:
+                prop.SetRepresentationToWireframe()
+            case _:
+                prop.SetRepresentationToSurface()
 
     def open_file_dialog(self):
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -76,23 +95,30 @@ class HelmetGui(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def align_mesh(self):
+        self.plotter.disable_picking()
         self.landmarks = []
+        self.labels = []
         self.plotter.enable_surface_point_picking(
-            callback=self.point_pick_cb, show_point=False)
+            callback=self.align_mesh_cb, show_point=False)
 
-    def point_pick_cb(self, picked_point):
+    def align_mesh_cb(self, picked_point):
         self.landmarks.append(picked_point)
-        self.plotter.add_point_labels(
-            points=[picked_point], labels=[picked_point], point_size=20, point_color="#FF0000")
+        self.labels.append(self.plotter.add_point_labels(
+            points=[picked_point], labels=[picked_point], show_points=False, name="point"+str(len(self.labels))))
         if len(self.landmarks) < 3:
             return
+
         self.plotter.disable_picking()
-        tmp = tempfile.NamedTemporaryFile(suffix=".stl")
-        self.mesh.save(tmp.name)
-        helmet.align_mesh(tmp.name, tmp.name, self.landmarks)
-        self.mesh = pyvista.read(tmp.name)
-        tmp.close()
+        with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
+            self.mesh.save(tmp.name)
+            helmet.align_mesh(tmp.name, tmp.name, self.landmarks)
+            self.mesh.points = pyvista.read(tmp.name).points
+
+        for label in self.labels:
+            self.plotter.remove_actor(label)
+
         self.show_mesh()
+        self.plotter.view_xz()
 
     @QtCore.Slot()
     def save_mesh(self):
@@ -102,38 +128,51 @@ class HelmetGui(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def clean_mesh(self):
-        tmp = tempfile.NamedTemporaryFile(suffix=".stl")
-        self.mesh.save(tmp.name)
-        helmet.clean_mesh(tmp.name, tmp.name)
-        self.mesh = pyvista.read(tmp.name)
-        tmp.close()
+        with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
+            self.mesh.save(tmp.name)
+            helmet.clean_mesh(tmp.name, tmp.name)
+            self.mesh = pyvista.read(tmp.name)
         self.show_mesh()
 
     @QtCore.Slot()
     def generate_helmet(self):
-        tmp = tempfile.NamedTemporaryFile(suffix=".stl")
-        self.mesh.save(tmp.name)
-        # helmet.apply_thickness(tmp.name, tmp.name, 4)
-        helmet.generate_helmet(tmp.name, tmp.name)
-        self.mesh = pyvista.read(tmp.name)
-        tmp.close()
+        with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
+            self.mesh.save(tmp.name)
+            helmet.generate_helmet(tmp.name, tmp.name)
+            self.mesh = pyvista.read(tmp.name)
         self.show_mesh()
 
     @QtCore.Slot()
     def cycle_representations(self):
-        actor = self.plotter.renderer.actors["mesh"]
-        prop = actor.GetProperty()
-        self.representation = (prop.GetRepresentation()+1) % 3
         rep_type = pyvista.plotting.opts.RepresentationType
-        match self.representation:
-            case rep_type.POINTS:
-                prop.SetRepresentationToPoints()
-            case rep_type.WIREFRAME:
-                prop.SetRepresentationToWireframe()
-            case _:
-                prop.SetRepresentationToSurface()
+        self.representation = (self.representation+1) % len(rep_type)
+        try:
+            self.apply_representation(self.plotter.actors["mesh"])
+        except KeyError:
+            pass
 
     @QtCore.Slot()
     def revert(self):
         self.mesh = pyvista.read(self.input_path)
+        self.show_mesh()
+        self.plotter.view_xz()
+
+    @QtCore.Slot()
+    def inflate(self):
+        self.plotter.disable_picking()
+        self.plotter.enable_surface_point_picking(
+            callback=self.inflate_cb, show_point=False)
+
+    def inflate_cb(self, picked_point):
+        with io.open("./config.toml", mode="rb") as config:
+            self.config = tomllib.load(config)
+
+        closest_cell = self.mesh.find_closest_cell(picked_point)
+
+        self.mesh.points = helmet.inflate(
+            vertices=self.mesh.points,
+            origin=picked_point,
+            direction=self.mesh.cell_normals[closest_cell],
+            radius=self.config["inflate"]["radius"],
+            height=self.config["inflate"]["height"])
         self.show_mesh()
