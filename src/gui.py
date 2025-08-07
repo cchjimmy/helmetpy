@@ -209,12 +209,14 @@ class HelmetGui(QtWidgets.QWidget):
         with io.open("./config.toml", mode="rb") as config:
             self.config = tomllib.load(config)
 
-        closest_cell = self.mesh.find_closest_cell(picked_point)
+        mesh = self.get_mesh(MeshNames.HELMET)
+
+        closest_cell = mesh.find_closest_cell(picked_point)
 
         mesh = self.get_mesh(MeshNames.HELMET)
         mesh.points = helmet.inflate(
             vertices=mesh.points,
             origin=picked_point,
-            normal=self.mesh.cell_normals[closest_cell],
+            normal=mesh.cell_normals[closest_cell],
             radius=self.config["inflate"]["radius"],
             height=self.config["inflate"]["height"])

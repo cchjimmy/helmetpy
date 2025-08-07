@@ -205,59 +205,19 @@ def sample_circular_path_3D(
         origin: np.ndarray,
         begin_dir: np.ndarray,
         n_samples: int = 100
-):
-    planar, to_3D = path.to_2D()
-    vertex_sequence = planar.discrete[0]
-
+) -> np.ndarray:
     # project origin to path plane
     plane_origin, plane_normal = trimesh.points.plane_fit(path.vertices)
     to_plane = trimesh.points.project_to_plane(
         [origin, origin+begin_dir], plane_origin=plane_origin, plane_normal=plane_normal, return_planar=True)
-    origin = to_plane[0]
-    d = to_plane[1] - origin
+    d = to_plane[1] - to_plane[0]
     begin_dir = d/np.linalg.norm(d)
 
-    verts = []
+    start_angle = math.atan2(begin_dir[1], begin_dir[0])
+    angles = np.arange(start=0, stop=2*math.pi, step=2 *
+                       math.pi/n_samples)+start_angle
 
-    # find beginning
-    begin_index = 0
-    vert_len = len(vertex_sequence)
-    for i in range(vert_len-1):
-        p1 = vertex_sequence[i]
-        p2 = vertex_sequence[i+1]
-        mag = np.linalg.norm(p2-p1)
-        intersects, intersection = intersect_rays_2D(
-            origin, begin_dir, p1, (p2-p1)/mag)
-        if not intersects or np.linalg.norm(intersection-p1) > mag:
-            continue
-        begin_index = i
-        intersection = to_3D@np.append(intersection, [0, 1])
-        verts.append(intersection[:3])
-        break
-
-    unit_radian = 2*math.pi/n_samples
-    target_radian = unit_radian
-    s = math.sin(target_radian)
-    c = math.cos(target_radian)
-    normal = np.array([[c, -s], [s, c]])@begin_dir
-    for i in range(vert_len-1):
-        p1 = vertex_sequence[(i+begin_index) % (vert_len-1)]
-        p2 = vertex_sequence[(i+begin_index+1) % (vert_len-1)]
-        mag = np.linalg.norm(p2-p1)
-        intersects, intersection = intersect_rays_2D(
-            origin, normal, p1, (p2-p1)/mag)
-        if not intersects or np.linalg.norm(intersection-p1) > mag:
-            continue
-        intersection = to_3D@np.append(intersection, [0, 1])
-        verts.append(intersection[:3])
-        target_radian = unit_radian * len(verts)
-        s = math.sin(target_radian)
-        c = math.cos(target_radian)
-        normal = np.array([[c, -s], [s, c]])@begin_dir
-        if len(verts) == n_samples:
-            break
-
-    return verts
+    return sample_circular_path_3D_at_angles(path, origin, angles)
 
 
 def intersect_rays_2D(r1_origin, r1_dir, r2_origin, r2_dir) -> (bool, np.ndarray):
@@ -283,6 +243,60 @@ def find_cephalic_index(path: trimesh.path.Path3D) -> float:
     planar, to_3D = path.to_2D()
     size = planar.bounds[1]-planar.bounds[0]
     return size[0]*100/size[1]
+
+
+def sample_circular_path_3D_at_angles(
+        path: trimesh.path.Path3D,
+        origin: np.ndarray,
+        angles: typing.List[float]
+) -> np.ndarray:
+    '''
+    assumes angles starts from +x, path is circular and origin is within the path when projected onto the path plane
+    '''
+    # project origin to path plane
+    plane_origin, plane_normal = trimesh.points.plane_fit(path.vertices)
+    to_plane = trimesh.points.project_to_plane(
+        [origin], plane_origin=plane_origin, plane_normal=plane_normal, return_planar=True)
+    origin = to_plane[0]
+
+    planar, to_3D = path.to_2D()
+    vertex_sequence = planar.discrete[0]
+    begin_index = 0
+    points = []
+    x = [1, 0]
+    vert_len = len(vertex_sequence)
+
+    while len(points) < len(angles):
+        c = math.cos(angles[len(points)])
+        s = math.sin(angles[len(points)])
+        rot = [[c, -s], [s, c]]
+        normal = np.matmul(rot, x)
+        for i in range(vert_len-1):
+            p1 = vertex_sequence[(i+begin_index) % (vert_len-1)]
+            p2 = vertex_sequence[(i+begin_index+1) % (vert_len-1)]
+            mag = np.linalg.norm(p2-p1)
+            intersects, intersection = intersect_rays_2D(
+                origin, normal, p1, (p2-p1)/mag)
+            if not intersects or np.linalg.norm(intersection - p1) > mag:
+                continue
+            begin_index = (i+begin_index) % (vert_len-1)
+            points.append((to_3D@np.append(intersection, [0, 1]))[:3])
+            break
+
+    return np.array(points)
+
+
+def find_cranial_vault_asymmetry_index(path: trimesh.path.Path3D, angle: float = math.pi*30/180) -> float:
+    '''
+    assumes path is circular, -y is front, angle in radians
+    '''
+    angles = [math.pi/2-angle, math.pi/2+angle,
+              math.pi*6/4-angle, math.pi*6/4+angle]
+    points = sample_circular_path_3D_at_angles(
+        path, path.centroid, angles)
+    a = np.linalg.norm(points[0]-points[2])
+    b = np.linalg.norm(points[1]-points[3])
+    return abs(a-b)/max(a, b)*100
 
 
 def gaussian(x: float = 0, a: float = 1, b: float = 0, c: float = 1) -> float:
@@ -334,6 +348,9 @@ def generate_helmet(
     slices = create_slices(output_path, plane_normal=cut_normal,
                            plane_origin=cut_origin, n_slices=n_slices)
 
+    print("CVAI:", find_cranial_vault_asymmetry_index(slices[0]))
+    print("CI:", find_cephalic_index(slices[0]))
+
     sampled = [
         sample_circular_path_3D(
             path=slices[i],
@@ -344,7 +361,7 @@ def generate_helmet(
     ]
 
     indices = np.arange(n_samples)
-    # indices = np.append(indices, [0])
+    indices = np.append(indices, [0])
     faces = [
         mesh_strip(indices+n_samples*i, indices+n_samples*(i+1))
         for i in range(len(sampled)-1)
