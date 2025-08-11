@@ -57,7 +57,7 @@ class HelmetGui(QtWidgets.QWidget):
         self.add_button(ButtonNames.IMPORT, self.import_mesh)
         self.add_button(ButtonNames.SAVE, self.save_mesh)
         self.add_button(ButtonNames.ALIGN, self.align_mesh,
-                        "Select three points in order: right tragus, nasion, left tragus.")
+                        "Select three points in order: temporal right, glabella, temporal left.")
         self.add_button(ButtonNames.GENERATE, self.generate_helmet,
                         tool_tip="Must align mesh first.", enabled=False)
         self.add_button(ButtonNames.CYCLE_VIEWS, self.cycle_representations)
@@ -87,7 +87,6 @@ class HelmetGui(QtWidgets.QWidget):
         self.input_path = self.open_file_dialog()
         mesh = pyvista.read(self.input_path)
         self.add_mesh(mesh, MeshNames.HELMET, show=False)
-        # self.add_mesh(mesh.copy(), MeshNames.ORIGINAL, show=False)
 
     def add_mesh(self, mesh: pyvista.PolyData, name: MeshNames, show=True) -> pyvista.Actor:
         actor = self.plotter.add_mesh(
@@ -95,6 +94,7 @@ class HelmetGui(QtWidgets.QWidget):
         self.plotter.reset_camera()
         self.apply_representation(actor)
         actor.visibility = show
+        return actor
 
     def get_mesh(self, name: MeshNames) -> pyvista.PolyData:
         return self.plotter.actors[name.value].mapper.dataset
@@ -151,7 +151,8 @@ class HelmetGui(QtWidgets.QWidget):
             mesh.save(tmp.name)
             transform = helmet.align_mesh(tmp.name, tmp.name, self.landmarks)
             self.landmarks = helmet.transform(self.landmarks, transform)
-            original = self.get_mesh(MeshNames.ORIGINAL)
+            original = pyvista.read(self.input_path)
+            self.add_mesh(original, MeshNames.ORIGINAL, False)
             original.points = helmet.transform(original.points, transform)
             self.add_mesh(pyvista.read(tmp.name), MeshNames.HELMET)
 
@@ -183,7 +184,9 @@ class HelmetGui(QtWidgets.QWidget):
                 cut_origin=plane_origin,
                 cut_normal=plane_normal,
                 n_samples=self.config["sampling"]["n_radial_samples"],
-                n_slices=self.config["sampling"]["n_vertical_slices"]
+                n_slices=self.config["sampling"]["n_vertical_slices"],
+                thickness=self.config["helmet"]["thickness"],
+                enlarge_displacement=self.config["helmet"]["enlarge_displacement"]
             )
             self.add_mesh(pyvista.read(tmp.name), MeshNames.HELMET)
 

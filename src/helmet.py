@@ -12,6 +12,12 @@ def clean_mesh(input_path: str, output_path: str):
     mesh.export(output_path)
 
 
+def enlarge(input_path: str, output_path: str, outward_displacement: float):
+    mesh = trimesh.load_mesh(input_path)
+    mesh.vertices += outward_displacement * mesh.vertex_normals
+    mesh.export(output_path)
+
+
 def thicken(input_path: str, output_path: str, thickness: float):
     if thickness <= 0:
         raise ValueError("thickness must be > 0.")
@@ -126,9 +132,9 @@ def align_mesh(input_path: str, output_path: str, landmarks: np.ndarray) -> np.n
         raise ValueError("Landmarks must have exactly three 3D points.")
 
     # credit: from mesh to meaning, ch.4.7, p.104
-    p1 = landmarks[0, :]  # right tragus
-    p2 = landmarks[1, :]  # nasion
-    p3 = landmarks[2, :]  # left tragus
+    p1 = landmarks[0, :]  # temporal right
+    p2 = landmarks[1, :]  # glabella
+    p3 = landmarks[2, :]  # temporal left
 
     centroid = (p1+p2+p3)/3
 
@@ -251,7 +257,9 @@ def sample_circular_path_3D_at_angles(
         angles: typing.List[float]
 ) -> np.ndarray:
     '''
-    assumes angles starts from +x, path is circular and origin is within the path when projected onto the path plane
+    path - must be circular
+    origin - must be within the path when projected onto the path plane
+    angles - starts from +x
     '''
     # project origin to path plane
     plane_origin, plane_normal = trimesh.points.plane_fit(path.vertices)
@@ -266,9 +274,10 @@ def sample_circular_path_3D_at_angles(
     x = [1, 0]
     vert_len = len(vertex_sequence)
 
-    while len(points) < len(angles):
-        c = math.cos(angles[len(points)])
-        s = math.sin(angles[len(points)])
+    while_count = 0
+    while while_count < len(angles):
+        c = math.cos(angles[while_count])
+        s = math.sin(angles[while_count])
         rot = [[c, -s], [s, c]]
         normal = np.matmul(rot, x)
         for i in range(vert_len-1):
@@ -282,13 +291,15 @@ def sample_circular_path_3D_at_angles(
             begin_index = (i+begin_index) % (vert_len-1)
             points.append((to_3D@np.append(intersection, [0, 1]))[:3])
             break
+        while_count += 1
 
     return np.array(points)
 
 
 def find_cranial_vault_asymmetry_index(path: trimesh.path.Path3D, angle: float = math.pi*30/180) -> float:
     '''
-    assumes path is circular, -y is front, angle in radians
+    path - must be circular
+    angle - in radians
     '''
     angles = [math.pi/2-angle, math.pi/2+angle,
               math.pi*6/4-angle, math.pi*6/4+angle]
@@ -334,27 +345,31 @@ def average_vectors(vectors: np.ndarray) -> np.ndarray:
     return sum(vectors) / len(vectors)
 
 
-def generate_helmet(
-        input_path: str,
-        output_path: str,
-        cut_origin: np.ndarray,
-        cut_normal: np.ndarray,
-        n_slices: int = 10,
-        n_samples: int = 25,
-):
-    clean_mesh(input_path, output_path)
-
+def resample(input_path: str,
+             output_path: str,
+             cut_origin: np.ndarray,
+             cut_normal: np.ndarray,
+             n_slices: int,
+             n_samples: int):
     x = np.array([1, 0, 0])
-    slices = create_slices(output_path, plane_normal=cut_normal,
+    slices = create_slices(input_path, plane_normal=cut_normal,
                            plane_origin=cut_origin, n_slices=n_slices)
+
+    for i in range(len(slices)):
+        if slices[i].is_closed:
+            continue
+        # ensures all gaps are closed
+        slices[i].fill_gaps(math.inf)
 
     print("CVAI:", find_cranial_vault_asymmetry_index(slices[0]))
     print("CI:", find_cephalic_index(slices[0]))
 
+    c_p = centroid(input_path)
+
     sampled = [
         sample_circular_path_3D(
             path=slices[i],
-            origin=centroid(output_path),
+            origin=c_p,
             begin_dir=x,
             n_samples=n_samples)
         for i in range(len(slices))
@@ -372,8 +387,37 @@ def generate_helmet(
         faces=np.vstack(tuple(faces)))\
         .export(output_path)
 
+
+def generate_helmet(
+        input_path: str,
+        output_path: str,
+        cut_origin: np.ndarray,
+        cut_normal: np.ndarray,
+        n_slices: int = 10,
+        n_samples: int = 25,
+        thickness: float = 4,
+        enlarge_displacement: float = 4
+):
+    clean_mesh(input_path, output_path)
+
+    resample(input_path=output_path,
+             output_path=output_path,
+             cut_origin=cut_origin,
+             cut_normal=cut_normal,
+             n_samples=n_samples,
+             n_slices=n_slices)
+
     arrange_mesh(output_path, output_path)
 
-    thicken(output_path, output_path, thickness=4)
+    offset = 1e-4
+    resample(input_path=output_path,
+             output_path=output_path,
+             cut_origin=cut_origin + offset*cut_normal,
+             cut_normal=cut_normal,
+             n_samples=n_samples,
+             n_slices=n_slices)
 
-    # show_norms(trimesh.load_mesh(output_path), 5)
+    enlarge(input_path=output_path, output_path=output_path,
+            outward_displacement=enlarge_displacement)
+
+    thicken(input_path=output_path, output_path=output_path, thickness=thickness)
