@@ -8,4 +8,4 @@ n_radial_samples = 25
 
 [helmet]
 thickness = 4
-enlarge_displacement = 1
+enlarge_displacement = 0

@@ -23,6 +23,8 @@ class ButtonNames(Enum):
     INFLATE = "Inflate"
     CYCLE_VIEWS = "Cycle Views"
     TOGGLE_ORIGINAL = "Toggle Original"
+    SAVE_LANDMARKS = "Save Landmarks"
+    LOAD_LANDMARKS = "Load Landmarks"
 
 
 class HelmetGui(QtWidgets.QWidget):
@@ -65,6 +67,9 @@ class HelmetGui(QtWidgets.QWidget):
         self.add_button(ButtonNames.INFLATE, self.inflate)
         self.add_button(ButtonNames.TOGGLE_ORIGINAL,
                         self.toggle_original_visibility)
+        self.add_button(ButtonNames.SAVE_LANDMARKS, self.save_landmarks)
+        self.add_button(ButtonNames.LOAD_LANDMARKS, self.load_landmarks,
+                        "Load landmarks and align mesh.")
 
     def add_button(self, name: ButtonNames, cb: typing.Callable[..., None], tool_tip: str = "", enabled: bool = True):
         button = QtWidgets.QPushButton(name.value)
@@ -84,9 +89,9 @@ class HelmetGui(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def import_mesh(self):
-        self.input_path = self.open_file_dialog()
+        self.input_path = self.open_file_dialog(filter_string="Mesh (*.stl)")
         mesh = pyvista.read(self.input_path)
-        self.add_mesh(mesh, MeshNames.HELMET, show=False)
+        self.add_mesh(mesh, MeshNames.HELMET)
 
     def add_mesh(self, mesh: pyvista.PolyData, name: MeshNames, show=True) -> pyvista.Actor:
         actor = self.plotter.add_mesh(
@@ -118,15 +123,15 @@ class HelmetGui(QtWidgets.QWidget):
             case _:
                 prop.SetRepresentationToSurface()
 
-    def open_file_dialog(self):
+    def open_file_dialog(self, filter_string: str = ""):
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             parent=self,
             caption="Open File",
-            filter="stl (*.stl)"
+            filter=filter_string
         )
         return file_path
 
-    def save_file_dialog(self):
+    def save_file_dialog(self, filter_string: str = ""):
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
             parent=self, caption="Save File")
         return file_path
@@ -149,11 +154,11 @@ class HelmetGui(QtWidgets.QWidget):
         with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
             mesh = self.get_mesh(MeshNames.HELMET)
             mesh.save(tmp.name)
-            transform = helmet.align_mesh(tmp.name, tmp.name, self.landmarks)
-            self.landmarks = helmet.transform(self.landmarks, transform)
+            self.transform = helmet.align_mesh(
+                tmp.name, tmp.name, self.landmarks)
             original = pyvista.read(self.input_path)
             self.add_mesh(original, MeshNames.ORIGINAL, False)
-            original.points = helmet.transform(original.points, transform)
+            original.points = helmet.transform(original.points, self.transform)
             self.add_mesh(pyvista.read(tmp.name), MeshNames.HELMET)
 
         for label in self.labels:
@@ -161,8 +166,7 @@ class HelmetGui(QtWidgets.QWidget):
 
         self.plotter.view_xz()
         self.plotter.disable_picking()
-        gen_helm_button = self.find_button(ButtonNames.GENERATE)
-        gen_helm_button.setEnabled(True)
+        self.find_button(ButtonNames.GENERATE).setEnabled(True)
 
     @QtCore.Slot()
     def save_mesh(self):
@@ -177,7 +181,9 @@ class HelmetGui(QtWidgets.QWidget):
 
         with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
             self.get_mesh(MeshNames.HELMET).save(tmp.name)
-            plane_origin, plane_normal = helmet.plane_fit(self.landmarks)
+            plane_origin, plane_normal = helmet.plane_fit(
+                helmet.transform(self.landmarks, self.transform))
+            print("--- Begin helmet generation ---")
             helmet.generate_helmet(
                 input_path=tmp.name,
                 output_path=tmp.name,
@@ -189,6 +195,9 @@ class HelmetGui(QtWidgets.QWidget):
                 enlarge_displacement=self.config["helmet"]["enlarge_displacement"]
             )
             self.add_mesh(pyvista.read(tmp.name), MeshNames.HELMET)
+            print("--- End helmet generation ---\n")
+
+        self.find_button(ButtonNames.GENERATE).setEnabled(False)
 
     @QtCore.Slot()
     def cycle_representations(self):
@@ -223,3 +232,21 @@ class HelmetGui(QtWidgets.QWidget):
             normal=mesh.cell_normals[closest_cell],
             radius=self.config["inflate"]["radius"],
             height=self.config["inflate"]["height"])
+
+    @QtCore.Slot()
+    def save_landmarks(self):
+        helmet.save_np_array(arr=self.landmarks,
+                             save_path=self.save_file_dialog("npy (*.npy)"))
+
+    @QtCore.Slot()
+    def load_landmarks(self):
+        self.landmarks = helmet.load_np_array(
+            load_path=self.open_file_dialog("npy (*.npy)"))
+        if self.landmarks.shape != (3, 3):
+            return
+        self.find_button(ButtonNames.GENERATE).setEnabled(True)
+        landmarks = self.landmarks.copy()
+        self.landmarks = []
+        self.labels = []
+        for i in range(len(landmarks)):
+            self.align_mesh_cb(landmarks[i])

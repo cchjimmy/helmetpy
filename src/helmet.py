@@ -5,6 +5,14 @@ import typing
 import pymeshfix
 
 
+def save_np_array(arr: np.ndarray, save_path: str):
+    np.save(file=save_path, arr=np.array(arr))
+
+
+def load_np_array(load_path: str):
+    return np.load(file=load_path)
+
+
 def clean_mesh(input_path: str, output_path: str):
     pymeshfix.clean_from_file(input_path, output_path)
     mesh = trimesh.load_mesh(output_path)
@@ -333,25 +341,12 @@ def inflate(vertices: np.ndarray, origin: np.ndarray, normal: np.ndarray, height
     return vertices
 
 
-def show_norms(mesh: trimesh.Trimesh, scale: float = 1):
-    lines = []
-    for i in range(len(mesh.vertices)):
-        lines.append([mesh.vertices[i], mesh.vertices[i] +
-                     mesh.vertex_normals[i]*scale])
-    trimesh.Scene(geometry=[trimesh.load_path(lines), mesh]).show()
-
-
-def average_vectors(vectors: np.ndarray) -> np.ndarray:
-    return sum(vectors) / len(vectors)
-
-
 def resample(input_path: str,
              output_path: str,
              cut_origin: np.ndarray,
              cut_normal: np.ndarray,
              n_slices: int,
              n_samples: int):
-    x = np.array([1, 0, 0])
     slices = create_slices(input_path, plane_normal=cut_normal,
                            plane_origin=cut_origin, n_slices=n_slices)
 
@@ -364,13 +359,11 @@ def resample(input_path: str,
     print("CVAI:", find_cranial_vault_asymmetry_index(slices[0]))
     print("CI:", find_cephalic_index(slices[0]))
 
-    c_p = centroid(input_path)
-
     sampled = [
         sample_circular_path_3D(
             path=slices[i],
-            origin=c_p,
-            begin_dir=x,
+            origin=centroid(input_path),
+            begin_dir=[1, 0, 0],
             n_samples=n_samples)
         for i in range(len(slices))
     ]
