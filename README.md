@@ -10,6 +10,7 @@ It generates the top part of the helmet.
 - Helmet base model generation using [trimesh](https://trimesh.org/index.html).
 - Model repair using [pymeshfix](https://pymeshfix.pyvista.org/index.html).
 - Model touch ups with 'inflate'.
+- Provides two sets of cranial vault asymmetry and cephalic indexes in terminal, before and after the front mirroring process.
 
 ## Notes
 
