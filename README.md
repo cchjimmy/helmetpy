@@ -19,7 +19,7 @@ It generates the top part of the helmet.
   2. Glabella - smooth area of the forehead located between the eyebrows, just above the nose.
   3. Temporal left - similar to “Temporal right” but on the left side of the head.
 
-- See [run.sh](./run.sh) for example usage.
+- See [run.sh](./run.sh) for example usage. All input parameters are optional.
 
 - This is a prototype and is not for medical use.
 
