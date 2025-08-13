@@ -51,8 +51,8 @@ def thicken(input_path: str, output_path: str, thickness: float):
     trimesh.Trimesh(vertices=vertices, faces=faces).export(output_path)
 
 
-def make_quad(tl, tr, bl, br) -> (typing.List, typing.List):
-    return [tl, tr, bl], [bl, tr, br]
+def make_quad(tl, tr, bl, br) -> typing.List:
+    return [[tl, tr, bl], [bl, tr, br]]
 
 
 def mesh_strip(indices1: np.ndarray, indices2: np.ndarray) -> np.ndarray:
@@ -63,13 +63,11 @@ def mesh_strip(indices1: np.ndarray, indices2: np.ndarray) -> np.ndarray:
 
     line_len = len(indices1)
     for i in range(line_len-1):
-        r1, r2 = make_quad(
+        faces.extend(make_quad(
             indices1[i],
             indices1[i+1],
             indices2[i],
-            indices2[i+1])
-        faces.append(r1)
-        faces.append(r2)
+            indices2[i+1]))
 
     return faces
 
@@ -84,7 +82,6 @@ def arrange_mesh(input_path: str, output_path: str):
 
     origin = mesh.bounding_box.centroid
 
-    # cut into 4 parts
     front = mesh.slice_plane(
         plane_normal=[0, -1, 0], plane_origin=origin)
 
@@ -242,7 +239,7 @@ def intersect_rays_2D(r1_origin, r1_dir, r2_origin, r2_dir) -> (bool, np.ndarray
     r2_origin = np.array(r2_origin)
     d = r2_origin-r1_origin
     det = np.cross(r1_dir, r2_dir)
-    if det == 0:
+    if np.linalg.norm(det) == 0:
         return False, np.array([])
     u = np.cross(d, r2_dir)/det
     v = np.cross(d, r1_dir)/det
@@ -381,6 +378,12 @@ def resample(input_path: str,
         .export(output_path)
 
 
+def slice_mesh(input_path: str, output_path: str, origin: np.array, normal: np.array):
+    mesh = trimesh.load_mesh(input_path)
+    mesh = mesh.slice_plane(plane_origin=origin, plane_normal=normal)
+    mesh.export(output_path)
+
+
 def generate_helmet(
         input_path: str,
         output_path: str,
@@ -393,19 +396,19 @@ def generate_helmet(
 ):
     clean_mesh(input_path, output_path)
 
+    offset = 1e-4
     resample(input_path=output_path,
              output_path=output_path,
-             cut_origin=cut_origin,
+             cut_origin=cut_origin-offset*cut_normal,
              cut_normal=cut_normal,
              n_samples=n_samples,
              n_slices=n_slices)
 
     arrange_mesh(output_path, output_path)
 
-    offset = 1e-4
     resample(input_path=output_path,
              output_path=output_path,
-             cut_origin=cut_origin + offset*cut_normal,
+             cut_origin=cut_origin,
              cut_normal=cut_normal,
              n_samples=n_samples,
              n_slices=n_slices)

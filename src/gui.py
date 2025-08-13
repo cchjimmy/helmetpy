@@ -48,8 +48,7 @@ class HelmetGui(QtWidgets.QWidget):
 
         if (self.input_path):
             mesh = pyvista.read(self.input_path)
-            self.add_mesh(mesh, MeshNames.HELMET)
-            self.add_mesh(mesh.copy(), MeshNames.ORIGINAL, show=False)
+            self.add_mesh(mesh, MeshNames.ORIGINAL, show=True)
 
         self.layout.addWidget(self.plotter)
 
@@ -67,7 +66,8 @@ class HelmetGui(QtWidgets.QWidget):
         self.add_button(ButtonNames.INFLATE, self.inflate)
         self.add_button(ButtonNames.TOGGLE_ORIGINAL,
                         self.toggle_original_visibility)
-        self.add_button(ButtonNames.SAVE_LANDMARKS, self.save_landmarks)
+        self.add_button(ButtonNames.SAVE_LANDMARKS,
+                        self.save_landmarks, enabled=False)
         self.add_button(ButtonNames.LOAD_LANDMARKS, self.load_landmarks,
                         "Load landmarks and align mesh.")
 
@@ -90,27 +90,34 @@ class HelmetGui(QtWidgets.QWidget):
     @QtCore.Slot()
     def import_mesh(self):
         self.input_path = self.open_file_dialog(filter_string="Mesh (*.stl)")
+        if self.input_path == "":
+            return
         mesh = pyvista.read(self.input_path)
-        self.add_mesh(mesh, MeshNames.HELMET)
+        self.add_mesh(mesh, MeshNames.ORIGINAL, True)
+        self.plotter.view_xz()
 
     def add_mesh(self, mesh: pyvista.PolyData, name: MeshNames, show=True) -> pyvista.Actor:
         actor = self.plotter.add_mesh(
             mesh=mesh, culling="back", name=name.value)
         self.plotter.reset_camera()
-        self.apply_representation(actor)
+        if name == MeshNames.HELMET:
+            self.apply_representation(actor)
         actor.visibility = show
         return actor
 
     def get_mesh(self, name: MeshNames) -> pyvista.PolyData:
         return self.plotter.actors[name.value].mapper.dataset
 
-    def set_mesh_visibility(self, name: MeshNames, show=True):
-        self.plotter.renderer.actors[name.value].visibility = show
-
     @QtCore.Slot()
     def toggle_original_visibility(self):
-        actor = self.plotter.actors[MeshNames.ORIGINAL.value]
-        actor.visibility = not actor.visibility
+        self.set_mesh_visibility(
+            MeshNames.ORIGINAL, not self.get_mesh_visibility(MeshNames.ORIGINAL))
+
+    def get_mesh_visibility(self, name: MeshNames):
+        return self.plotter.actors[name.value].visibility
+
+    def set_mesh_visibility(self, name: MeshNames, show=True):
+        self.plotter.actors[name.value].visibility = show
 
     def apply_representation(self, actor):
         prop = actor.GetProperty()
@@ -152,14 +159,13 @@ class HelmetGui(QtWidgets.QWidget):
             return
 
         with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
-            mesh = self.get_mesh(MeshNames.HELMET)
+            mesh = self.get_mesh(MeshNames.ORIGINAL)
             mesh.save(tmp.name)
             self.transform = helmet.align_mesh(
                 tmp.name, tmp.name, self.landmarks)
             original = pyvista.read(self.input_path)
-            self.add_mesh(original, MeshNames.ORIGINAL, False)
             original.points = helmet.transform(original.points, self.transform)
-            self.add_mesh(pyvista.read(tmp.name), MeshNames.HELMET)
+            self.add_mesh(original, MeshNames.ORIGINAL, True)
 
         for label in self.labels:
             self.plotter.remove_actor(label)
@@ -167,11 +173,14 @@ class HelmetGui(QtWidgets.QWidget):
         self.plotter.view_xz()
         self.plotter.disable_picking()
         self.find_button(ButtonNames.GENERATE).setEnabled(True)
+        self.find_button(ButtonNames.SAVE_LANDMARKS).setEnabled(True)
 
     @QtCore.Slot()
     def save_mesh(self):
         if not self.output_path:
             self.output_path = self.save_file_dialog()
+        if self.output_path == "":
+            return
         self.get_mesh(MeshNames.HELMET).save(self.output_path)
 
     @QtCore.Slot()
@@ -180,7 +189,7 @@ class HelmetGui(QtWidgets.QWidget):
             self.config = tomllib.load(config)
 
         with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
-            self.get_mesh(MeshNames.HELMET).save(tmp.name)
+            self.get_mesh(MeshNames.ORIGINAL).save(tmp.name)
             plane_origin, plane_normal = helmet.plane_fit(
                 helmet.transform(self.landmarks, self.transform))
             print("--- Begin helmet generation ---")
@@ -194,21 +203,28 @@ class HelmetGui(QtWidgets.QWidget):
                 thickness=self.config["helmet"]["thickness"],
                 enlarge_displacement=self.config["helmet"]["enlarge_displacement"]
             )
+            print("--- End of helmet generation ---\n")
             self.add_mesh(pyvista.read(tmp.name), MeshNames.HELMET)
-            print("--- End helmet generation ---\n")
 
         self.find_button(ButtonNames.GENERATE).setEnabled(False)
+        self.set_mesh_visibility(MeshNames.ORIGINAL, False)
+        self.set_mesh_visibility(MeshNames.HELMET, True)
+        self.plotter.reset_camera()
+        self.plotter.view_xz()
 
     @QtCore.Slot()
     def cycle_representations(self):
         rep_type = pyvista.plotting.opts.RepresentationType
         self.representation = (self.representation+1) % len(rep_type)
+        if MeshNames.HELMET.value not in self.plotter.actors:
+            return
         self.apply_representation(
             actor=self.plotter.actors[MeshNames.HELMET.value])
 
     @QtCore.Slot()
     def revert(self):
-        self.add_mesh(pyvista.read(self.input_path), MeshNames.HELMET)
+        self.add_mesh(pyvista.read(self.input_path), MeshNames.ORIGINAL)
+        self.set_mesh_visibility(MeshNames.HELMET, False)
         self.plotter.view_xz()
 
     @QtCore.Slot()
@@ -235,18 +251,28 @@ class HelmetGui(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def save_landmarks(self):
+        if "landmarks" not in self:
+            return
+        save_path = self.save_file_dialog("npy (*.npy)")
+        if save_path == "":
+            return
         helmet.save_np_array(arr=self.landmarks,
-                             save_path=self.save_file_dialog("npy (*.npy)"))
+                             save_path=save_path)
 
     @QtCore.Slot()
     def load_landmarks(self):
+        load_path = self.open_file_dialog("npy (*.npy)")
+        if load_path == "":
+            return
         self.landmarks = helmet.load_np_array(
-            load_path=self.open_file_dialog("npy (*.npy)"))
+            load_path=load_path)
         if self.landmarks.shape != (3, 3):
             return
-        self.find_button(ButtonNames.GENERATE).setEnabled(True)
         landmarks = self.landmarks.copy()
         self.landmarks = []
         self.labels = []
         for i in range(len(landmarks)):
             self.align_mesh_cb(landmarks[i])
+
+        self.find_button(ButtonNames.GENERATE).setEnabled(True)
+        self.find_button(ButtonNames.SAVE_LANDMARKS).setEnabled(True)
