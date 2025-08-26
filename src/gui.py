@@ -25,6 +25,7 @@ class ButtonNames(Enum):
     TOGGLE_ORIGINAL = "Toggle Original"
     SAVE_LANDMARKS = "Save Landmarks"
     LOAD_LANDMARKS = "Load Landmarks"
+    GEN_PLANE = "gen plane"
 
 
 class HelmetGui(QtWidgets.QWidget):
@@ -55,6 +56,7 @@ class HelmetGui(QtWidgets.QWidget):
         self.buttons = QtWidgets.QVBoxLayout()
         self.layout.addLayout(self.buttons)
 
+        # self.add_button(ButtonNames.GEN_PLANE, self.gen_plane)
         self.add_button(ButtonNames.IMPORT, self.import_mesh)
         self.add_button(ButtonNames.SAVE, self.save_mesh)
         self.add_button(ButtonNames.ALIGN, self.align_mesh,
@@ -93,7 +95,8 @@ class HelmetGui(QtWidgets.QWidget):
         if self.input_path == "":
             return
         mesh = pyvista.read(self.input_path)
-        self.add_mesh(mesh, MeshNames.ORIGINAL, True)
+        self.add_mesh(mesh, MeshNames.ORIGINAL, False)
+        self.add_mesh(mesh.copy(), MeshNames.HELMET, True)
         self.plotter.view_xz()
 
     def add_mesh(self, mesh: pyvista.PolyData, name: MeshNames, show=True) -> pyvista.Actor:
@@ -101,7 +104,7 @@ class HelmetGui(QtWidgets.QWidget):
             mesh=mesh, culling="back", name=name.value)
         self.plotter.reset_camera()
         if name == MeshNames.HELMET:
-            self.apply_representation(actor)
+            self.apply_representation(actor, self.representation)
         actor.visibility = show
         return actor
 
@@ -119,10 +122,10 @@ class HelmetGui(QtWidgets.QWidget):
     def set_mesh_visibility(self, name: MeshNames, show=True):
         self.plotter.actors[name.value].visibility = show
 
-    def apply_representation(self, actor):
+    def apply_representation(self, actor, representation: pyvista.plotting.opts.RepresentationType):
         prop = actor.GetProperty()
         rep_type = pyvista.plotting.opts.RepresentationType
-        match self.representation:
+        match representation:
             case rep_type.POINTS:
                 prop.SetRepresentationToPoints()
             case rep_type.WIREFRAME:
@@ -219,12 +222,12 @@ class HelmetGui(QtWidgets.QWidget):
         if MeshNames.HELMET.value not in self.plotter.actors:
             return
         self.apply_representation(
-            actor=self.plotter.actors[MeshNames.HELMET.value])
+            self.plotter.actors[MeshNames.HELMET.value], self.representation)
 
     @QtCore.Slot()
     def revert(self):
-        self.add_mesh(pyvista.read(self.input_path), MeshNames.ORIGINAL)
-        self.set_mesh_visibility(MeshNames.HELMET, False)
+        self.add_mesh(self.get_mesh(
+            MeshNames.ORIGINAL).copy(), MeshNames.HELMET)
         self.plotter.view_xz()
 
     @QtCore.Slot()
@@ -276,3 +279,11 @@ class HelmetGui(QtWidgets.QWidget):
 
         self.find_button(ButtonNames.GENERATE).setEnabled(True)
         self.find_button(ButtonNames.SAVE_LANDMARKS).setEnabled(True)
+
+    @QtCore.Slot()
+    def gen_plane(self):
+        plane_path = "./models/plane.stl"
+        helmet.generate_plane(10, 10, 20, plane_path)
+        plane = pyvista.read(plane_path)
+        self.add_mesh(plane, MeshNames.HELMET, True)
+        self.add_mesh(plane.copy(), MeshNames.ORIGINAL, False)

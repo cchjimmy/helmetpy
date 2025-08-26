@@ -115,13 +115,13 @@ def arrange_mesh(input_path: str, output_path: str):
     else:
         parts[1].apply_translation(diff)
 
-    helmet = trimesh.util.concatenate(parts)
-    print("before merge:", len(helmet.vertices))
-    helmet.merge_vertices()
-    print("after merge:", len(helmet.vertices))
-    helmet.fix_normals()
+    mesh = trimesh.util.concatenate(parts)
+    print("before merge:", len(mesh.vertices))
+    mesh.merge_vertices()
+    print("after merge:", len(mesh.vertices))
+    mesh.fix_normals()
 
-    helmet.export(output_path)
+    mesh.export(output_path)
 
 
 def align_mesh(input_path: str, output_path: str, landmarks: np.ndarray) -> np.ndarray:
@@ -365,6 +365,9 @@ def resample(input_path: str,
         for i in range(len(slices))
     ]
 
+    # trimesh.Scene(
+    #     geometry=[trimesh.PointCloud(vertices=np.vstack(tuple(sampled)))]).show()
+
     indices = np.arange(n_samples)
     indices = np.append(indices, [0])
     faces = [
@@ -417,3 +420,24 @@ def generate_helmet(
             outward_displacement=enlarge_displacement)
 
     thicken(input_path=output_path, output_path=output_path, thickness=thickness)
+
+
+def generate_plane(width: float, height: float, divisions: int, output_path: str):
+    dx = width / divisions
+    dy = height / divisions
+    n_side_points = divisions + 2
+    vertices = []
+    for i in range(n_side_points):
+        for j in range(n_side_points):
+            vertices.append([i*dx-width*0.5, j*dy-height*0.5, 0])
+    indices_line = np.arange(n_side_points)
+    indices = []
+    for i in range(divisions):
+        strip = mesh_strip(indices_line+i*n_side_points,
+                           indices_line+(i+1)*n_side_points)
+        indices.extend(strip)
+
+    indices = np.array(indices)
+    indices[:, [0, 1]] = indices[:, [1, 0]]
+
+    trimesh.Trimesh(vertices=vertices, faces=indices).export(output_path)
