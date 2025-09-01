@@ -49,7 +49,8 @@ class HelmetGui(QtWidgets.QWidget):
 
         if (self.input_path):
             mesh = pyvista.read(self.input_path)
-            self.add_mesh(mesh, MeshNames.ORIGINAL, show=True)
+            self.add_mesh(mesh, MeshNames.ORIGINAL, show=False)
+            self.add_mesh(mesh.copy(), MeshNames.HELMET, show=True)
 
         self.layout.addWidget(self.plotter)
 
@@ -162,13 +163,11 @@ class HelmetGui(QtWidgets.QWidget):
             return
 
         with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
-            mesh = self.get_mesh(MeshNames.ORIGINAL)
+            mesh = self.get_mesh(MeshNames.HELMET)
             mesh.save(tmp.name)
             self.transform = helmet.align_mesh(
                 tmp.name, tmp.name, self.landmarks)
-            original = pyvista.read(self.input_path)
-            original.points = helmet.transform(original.points, self.transform)
-            self.add_mesh(original, MeshNames.ORIGINAL, True)
+            self.add_mesh(pyvista.read(tmp.name), MeshNames.HELMET, True)
 
         for label in self.labels:
             self.plotter.remove_actor(label)
@@ -192,9 +191,11 @@ class HelmetGui(QtWidgets.QWidget):
             self.config = tomllib.load(config)
 
         with tempfile.NamedTemporaryFile(suffix=".stl") as tmp:
-            self.get_mesh(MeshNames.ORIGINAL).save(tmp.name)
+            self.get_mesh(MeshNames.HELMET).save(tmp.name)
             plane_origin, plane_normal = helmet.plane_fit(
                 helmet.transform(self.landmarks, self.transform))
+            self.get_mesh(MeshNames.ORIGINAL).points = self.get_mesh(
+                MeshNames.HELMET).points
             print("--- Begin helmet generation ---")
             helmet.generate_helmet(
                 input_path=tmp.name,
@@ -226,8 +227,8 @@ class HelmetGui(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def revert(self):
-        self.add_mesh(self.get_mesh(
-            MeshNames.ORIGINAL).copy(), MeshNames.HELMET)
+        self.add_mesh(pyvista.read(self.input_path),
+                      name=MeshNames.HELMET, show=True)
         self.plotter.view_xz()
 
     @QtCore.Slot()

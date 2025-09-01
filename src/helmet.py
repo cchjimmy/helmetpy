@@ -312,6 +312,9 @@ def find_cranial_vault_asymmetry_index(path: trimesh.path.Path3D, angle: float =
         path, path.centroid, angles)
     a = np.linalg.norm(points[0]-points[2])
     b = np.linalg.norm(points[1]-points[3])
+
+    # trimesh.Scene(geometry=[path, trimesh.load_path(
+    #     [[points[0], points[2]], [points[1], points[3]]])]).show()
     return abs(a-b)/max(a, b)*100
 
 
